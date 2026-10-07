@@ -139,10 +139,13 @@ class ValidationDatasetConfig(DatasetConfig):
 
 
 class LMDBDataset(torch.utils.data.Dataset):
-    def __init__(self, config: DatasetConfig):
+    def __init__(self, config: DatasetConfig, lm_name: str = "atlaslm-3b"):
         super().__init__()
         self.name: str = config.name
-        self.lm_alphabet: Alphabet = Alphabet()
+        # The LM tokenizer alphabet must match the folding model's backbone.
+        from atlasfold.common.lm import get_lm_alphabet
+
+        self.lm_alphabet = get_lm_alphabet(lm_name)
 
         # Set path
         if config.data_dir is None:
@@ -191,8 +194,9 @@ class TrainingDataset(LMDBDataset):
         config: TrainingDatasetConfig,
         max_length: int = 256,
         max_seq_length: int = 384,
+        lm_name: str = "atlaslm-3b",
     ):
-        super().__init__(config)
+        super().__init__(config, lm_name)
         self.config: TrainingDatasetConfig = config
         self.cropper = ProteinCropper(
             prob_spatial=0.6, prob_contiguous=0.2, prob_multi_contiguous=0.2
@@ -297,7 +301,7 @@ class TrainingDataset(LMDBDataset):
         m = metadata.Metadata.from_dict(metadata_dict)
         prot = self.fetch_protein(m.id)
 
-        feat = featurize.featurize(prot.sequence)
+        feat = featurize.featurize(prot.sequence, alphabet=self.lm_alphabet)
         label = self.prepare_labels(prot)
         loss_mask = self.prepare_loss_masks(m)
 
@@ -311,7 +315,11 @@ class TrainingDataset(LMDBDataset):
 
         # Prepare the LM input with expanded crop indices and BOS/EOS tokens.
         lm_crop_indices = self._expand_crop_indices_for_lm(
-            crop_indices, len(prot), self.max_seq_length
+            crop_indices,
+            len(prot),
+            self.max_seq_length,
+            n_prefix=self.lm_alphabet.n_prefix,
+            n_suffix=self.lm_alphabet.n_suffix,
         )
         lm_input = {k: v[lm_crop_indices] for k, v in lm_input.items()}
 
@@ -365,19 +373,24 @@ class TrainingDataset(LMDBDataset):
         crop_indices: np.ndarray,
         seqlen: int,
         max_seq_length: int = 384,
+        n_prefix: int = 1,
+        n_suffix: int = 1,
     ) -> np.ndarray:
+        # n_prefix / n_suffix are the special tokens wrapping the residues in the
+        # LM token array (AtlasLM: <cls>+res+<eos> => 1,1; ProtT5: res+</s> => 0,1).
+        n_special = n_prefix + n_suffix
         assert len(crop_indices) <= seqlen, "Crop indices cannot exceed sequence length"
-        if seqlen <= max_seq_length - 2:
+        if seqlen <= max_seq_length - n_special:
             # If the full sequence fits within the LM input limit, use the entire sequence
-            return np.arange(seqlen + 2)
+            return np.arange(seqlen + n_special)
 
         # NOTE: We assume that there is no missing residue in the input sequence.
         # We already complete the missing residues to 'UNK' with 'NaN' coordinates.
         budget = max_seq_length - len(crop_indices)
 
         # Initialize a boolean mask for the LM input tokens
-        seq_crop_mask = np.zeros(seqlen + 2, dtype=bool)
-        shifted_crops = crop_indices + 1  # Shift by 1 to account for BOS token at index 0
+        seq_crop_mask = np.zeros(seqlen + n_special, dtype=bool)
+        shifted_crops = crop_indices + n_prefix  # account for prefix specials
         seq_crop_mask[shifted_crops] = True
 
         # Determine the segments of contiguous indices
@@ -457,7 +470,7 @@ class TrainingDataset(LMDBDataset):
                     expanded = True
 
                 # Expand rightmost anchor to the right
-                if right_cursor <= seqlen + 1 and budget > 0:
+                if right_cursor <= seqlen + n_special - 1 and budget > 0:
                     if not seq_crop_mask[right_cursor]:
                         seq_crop_mask[right_cursor] = True
                         budget -= 1
@@ -478,6 +491,7 @@ class MultiTrainingDataset(torch.utils.data.Dataset):
         configs: list[TrainingDatasetConfig],
         max_length: int = 256,
         max_seq_length: int = 384,
+        lm_name: str = "atlaslm-3b",
     ) -> None:
         """
         Parameters
@@ -490,7 +504,8 @@ class MultiTrainingDataset(torch.utils.data.Dataset):
             Maximum sequence length for the language model input (default: 384).
         """
         self.datasets: list[TrainingDataset] = [
-            TrainingDataset(config, max_length, max_seq_length) for config in configs
+            TrainingDataset(config, max_length, max_seq_length, lm_name)
+            for config in configs
         ]
         ds_weights: list[np.ndarray] = [ds.get_sampling_weights() for ds in self.datasets]
         self.weights: np.ndarray = np.concatenate(
@@ -513,8 +528,8 @@ class MultiTrainingDataset(torch.utils.data.Dataset):
 
 
 class ValidationDataset(LMDBDataset):
-    def __init__(self, config: ValidationDatasetConfig):
-        super().__init__(config)
+    def __init__(self, config: ValidationDatasetConfig, lm_name: str = "atlaslm-3b"):
+        super().__init__(config, lm_name)
         self.config = config
         self.name = config.name
 
@@ -530,7 +545,7 @@ class ValidationDataset(LMDBDataset):
         prot = self.fetch_protein(m.id)
 
         # NOTE: For validation, we directly use lm features from featurization.
-        feat = featurize.featurize(prot.sequence)
+        feat = featurize.featurize(prot.sequence, alphabet=self.lm_alphabet)
         label = self.prepare_labels(prot)
 
         feat = {k: torch.from_numpy(v) for k, v in feat.items()}

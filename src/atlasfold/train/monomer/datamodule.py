@@ -29,6 +29,11 @@ class DataModuleConfig:
     max_length: int = 256
     max_seq_length: int = 384
 
+    # === Language model === #
+    # Must match the folding model's AtlasFoldConfig.lm_name so tokenization
+    # agrees with the backbone (e.g. "atlaslm-3b", "prott5-xl").
+    lm_name: str = "atlaslm-3b"
+
     # === Dataset configs === #
     data_root: str
     train_datasets: list[TrainingDatasetConfig] = dataclasses.field(default_factory=list)
@@ -74,6 +79,7 @@ class TrainingDataModule(pl.LightningDataModule):
             configs=self.config.train_datasets,
             max_length=self.config.max_length,
             max_seq_length=self.config.max_seq_length,
+            lm_name=self.config.lm_name,
         )
         # Print dataset info
         for d in multi_ds.datasets:
@@ -90,7 +96,9 @@ class TrainingDataModule(pl.LightningDataModule):
         if hasattr(self, "_val_ds"):
             return self._val_ds
 
-        ds = ValidationDataset(config=self.config.val_dataset)
+        ds = ValidationDataset(
+            config=self.config.val_dataset, lm_name=self.config.lm_name
+        )
         self.print_rank_zero(
             f"Constructed validation dataset '{ds.name}':\n"
             f"  Num complexes: {len(ds.metadatas)}\n"

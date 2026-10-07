@@ -79,7 +79,7 @@ class Attention(nn.Module):
             # Compute attention weights and output in high precision (float32)
             with torch.autocast(device_type=q.device.type, enabled=False):
                 q, k = q.float(), k.float()
-                q *= self.head_dim**-0.5
+                q = q * self.head_dim**-0.5  # out-of-place: q may be a view (autograd-safe)
                 # Compute attention weights
                 attn = q @ k.mT  # [*, H, Lq, Lk]
                 attn += ((~mask).float() * -self.inf).unsqueeze(-3)

@@ -31,11 +31,22 @@ def featurize(
     sym_id: int = 1,
     residue_index: Sequence[int] | None = None,
     pad_to_multiple_of: int | None = None,
+    alphabet=None,
 ) -> dict[str, np.ndarray]:
-    """Featurize the input sequence for the model."""
+    """Featurize the input sequence for the model.
+
+    ``alphabet`` is the language-model tokenizer view (defaults to the AtlasLM
+    ESM-3 alphabet). It supplies ``encode`` and the ``n_prefix``/``n_suffix``
+    special-token counts so the LM token layout matches the chosen PLM (e.g.
+    AtlasLM uses ``<cls>`` + residues + ``<eos>``; ProtT5 uses residues + ``</s>``).
+    """
     assert entity_id > 0, "entity_id must be a positive integer starting from 1."
     assert asym_id > 0, "asym_id must be a positive integer starting from 1."
     assert sym_id > 0, "sym_id must be a positive integer starting from 1."
+    if alphabet is None:
+        from atlaslm.alphabet import Alphabet
+
+        alphabet = Alphabet()
 
     # Sanitize the input sequence
     sequence = sequence.upper()
@@ -56,11 +67,19 @@ def featurize(
         res_idx = np.arange(1, length + 1, dtype=np.int64)
 
     # === Prepare the input for the language model trunk === #
-    input_ids = np.array(
-        [BOS_IDX] + [VOCAB_TO_IDX[aa] for aa in sequence] + [EOS_IDX], dtype=np.int64
+    # Token layout is [n_prefix specials] + residues + [n_suffix specials].
+    input_ids = np.asarray(alphabet.encode(sequence), dtype=np.int64)
+    n_prefix, n_suffix = alphabet.n_prefix, alphabet.n_suffix
+    assert input_ids.shape[0] == n_prefix + length + n_suffix, (
+        "alphabet.encode length does not match n_prefix + length + n_suffix "
+        f"(got {input_ids.shape[0]}, expected {n_prefix + length + n_suffix})."
     )
-
-    pos_id = np.concatenate(([0], res_idx, [res_idx[-1] + 1]))
+    # Prefix specials get position 0; residues get res_idx; suffix specials get
+    # positions after the last residue. These keep special tokens out of res_idx
+    # so seq_tok_idx (via isin with res_idx) selects exactly the residue tokens.
+    prefix_pos = np.zeros(n_prefix, dtype=np.int64)
+    suffix_pos = res_idx[-1] + 1 + np.arange(n_suffix, dtype=np.int64)
+    pos_id = np.concatenate([prefix_pos, res_idx, suffix_pos])
     seq_id = np.full_like(input_ids, asym_id, dtype=np.int64)
 
     lm_input = {
@@ -84,8 +103,8 @@ def featurize(
     cbeta_idx = np.full((length,), 4, dtype=np.int64)  # CB: index=4
     cbeta_idx[aatype == residue_constants.restype_orders["G"]] = 1
 
-    # Add lm input to folding input mapping
-    seq_tok_idx = np.arange(1, length + 1, dtype=np.int64)
+    # Add lm input to folding input mapping (residue tokens start after prefixes)
+    seq_tok_idx = np.arange(n_prefix, n_prefix + length, dtype=np.int64)
 
     folding_input = {
         "entity_id": entity_id_arr,  # [L]

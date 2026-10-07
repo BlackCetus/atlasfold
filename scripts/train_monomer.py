@@ -182,14 +182,29 @@ def build_trainer(cfg, debug: bool = False) -> pl.Trainer:
     callbacks.append(tqdm_callback)
 
     if not debug:
-        checkpoint_callback = pl_callbacks.ModelCheckpoint(
+        ckpt_dir = save_dir / "checkpoints"
+        # Best-by-validation-LDDT checkpoints (the benchmark deliverable).
+        best_ckpt = pl_callbacks.ModelCheckpoint(
+            dirpath=ckpt_dir,
             monitor="val/top/lddt",
             save_top_k=-1,
             filename="epoch{epoch:04d}_step{step:08d}_lddt{val/rank/lddt:.4f}",
             mode="max",
             auto_insert_metric_name=False,
         )
-        callbacks.append(checkpoint_callback)
+        callbacks.append(best_ckpt)
+        # Periodic checkpoints + last.ckpt: progress survives the wall-time limit
+        # and jobs auto-resume. every_n_train_steps counts optimizer steps.
+        periodic_ckpt = pl_callbacks.ModelCheckpoint(
+            dirpath=ckpt_dir,
+            every_n_train_steps=pl_trainer_cfg.get("ckpt_every_n_train_steps", 100),
+            # monitor=None requires save_top_k in {-1, 0, 1}; keep the most recent.
+            save_top_k=pl_trainer_cfg.get("ckpt_save_top_k", 1),
+            save_last=True,
+            filename="periodic_step{step:08d}",
+            auto_insert_metric_name=False,
+        )
+        callbacks.append(periodic_ckpt)
 
     trainer = pl.Trainer(
         default_root_dir=save_dir,
@@ -203,6 +218,7 @@ def build_trainer(cfg, debug: bool = False) -> pl.Trainer:
         max_epochs=pl_trainer_cfg.max_epochs,
         limit_train_batches=pl_trainer_cfg.limit_train_batches,
         limit_val_batches=pl_trainer_cfg.limit_val_batches,
+        val_check_interval=pl_trainer_cfg.get("val_check_interval", 1.0),
         log_every_n_steps=pl_trainer_cfg.log_every_n_steps,
         enable_checkpointing=pl_trainer_cfg.enable_checkpointing,
         accumulate_grad_batches=pl_trainer_cfg.accumulate_grad_batches,

@@ -216,3 +216,10 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Misc
+slurm/log/
+experiments/
+atlasfold_data/
+experiments_probe/
+.tmp_tput_jid

@@ -26,6 +26,10 @@ class Alphabet:
         self.aa_idxs: list[int] = [
             self.tok_to_idx[tok] for tok in AMINO_ACIDS if tok in self.tok_to_idx
         ]
+        # Number of special tokens wrapping the residues: <cls> + residues + <eos>.
+        # Used by the featurizer/crop logic (generalized across PLM tokenizers).
+        self.n_prefix: int = 1
+        self.n_suffix: int = 1
 
     def __len__(self) -> int:
         return len(self.tokens)

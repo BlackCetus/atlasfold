@@ -47,3 +47,10 @@ train = [
   "pandas",
   "zstandard"
 ]
+plm = [
+  # Third-party protein language models used via atlaslm.adapters (e.g. ProtT5).
+  # Pinned: the T5 internals the ProtT5 adapter captures against are version-specific.
+  "transformers==5.18.0",
+  "sentencepiece", # ProtT5 SentencePiece tokenizer
+  "protobuf", # required by the slow T5 tokenizer
+]

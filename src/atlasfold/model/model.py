@@ -110,9 +110,13 @@ class AtlasFold(torch.nn.Module):
         self.atom_rel_pos_encoding = AtomRelativePositionEncoding(max_r=4)
 
         # === Language model === #
+        # Dispatch on cfg.lm_name: AtlasLM (ESM-3 family) or a PLMAdapter such as
+        # ProtT5Adapter. The adapter duck-types AtlasLM, so everything below is
+        # agnostic to which backbone was selected.
         if lm is None:
-            lm_source = Path(cfg.lm_path) if cfg.lm_path is not None else cfg.lm_name
-            lm = AtlasLM.from_pretrained(lm_source, dtype=torch.bfloat16)
+            from atlasfold.common.lm import build_lm
+
+            lm = build_lm(cfg.lm_name, cfg.lm_path, dtype=torch.bfloat16)
         self.lm: AtlasLM = lm
         # Freeze LM parameters
         self.lm.requires_grad_(False)

@@ -386,7 +386,7 @@ class TriangleAttentionStartingNode(nn.Module):
                 scale=self.scale,
             )
         else:
-            q *= self.scale
+            q = q * self.scale  # out-of-place: q is a view (autograd-safe on torch backend)
             k = k.transpose(-1, -2)
             a = torch.matmul(q, k)
             # Apply mask and bias
@@ -503,7 +503,7 @@ class TriangleAttentionEndingNode(nn.Module):
                 scale=self.scale,
             )
         else:
-            q *= self.scale
+            q = q * self.scale  # out-of-place: q is a view (autograd-safe on torch backend)
             k = k.transpose(-1, -2)
             a = torch.matmul(q, k)
             # Apply mask and bias

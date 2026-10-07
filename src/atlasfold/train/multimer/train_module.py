@@ -47,7 +47,8 @@ class TrainingModule(monomer_train_module.TrainingModule):
             OmegaConf.merge(AtlasFoldMultimerConfig, self.global_config.model)
         )
         self.model: AtlasFoldForTrain = AtlasFoldForTrain(model_cfg)
-        self.model.kernel_backend = "cuequiv"
+        # cuequivariance kernels are unavailable on this (aarch64) cluster; use torch.
+        self.model.kernel_backend = "torch"
 
         self.freeze_submodules()
         self.setup_losses()
